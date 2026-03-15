@@ -1,8 +1,10 @@
 #ifndef CORPC_CONCEPTS_HPP
 #define CORPC_CONCEPTS_HPP
 
-#include "corpc/utils.hpp"
+#include "corpc/non_void_helper.hpp"
 #include <coroutine>
+#include <utility>
+
 namespace corpc
 {
 template <typename A>
@@ -21,14 +23,17 @@ template <typename A> struct AwaitableTraits;
 
 template <Awaiter A> struct AwaitableTraits<A>
 {
-	using RetType = decltype(std::declval<A>().await_resume());
-	using NonVoidRetType = NonVoidHelper<RetType>::Type;
+	using RetType =
+		decltype(std::declval<A>().await_resume()); // co_await 最后会返回
+	// await_resume() 的返回值
+	using NonVoidRetType =
+		NonVoidHelper<RetType>::Type; // RetType 可能是 void, 不可作为类型
 };
 
 template <typename A>
 	requires(!Awaiter<A> && Awaitable<A>)
 struct AwaitableTraits<A>
-	: public AwaitableTraits<decltype(std::declval<A>().operator co_await())>
+	: AwaitableTraits<decltype(std::declval<A>().operator co_await())>
 {
 };
 } // namespace corpc

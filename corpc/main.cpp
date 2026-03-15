@@ -1,4 +1,3 @@
-#include "corpc/when_any.hpp"
 #include "corpc/and_then.hpp"
 #include "corpc/async_loop.hpp"
 #include "corpc/check_error.hpp"
@@ -7,6 +6,7 @@
 #include "corpc/promise.hpp"
 #include "corpc/timer_loop.hpp"
 #include "corpc/when_all.hpp"
+#include "corpc/when_any.hpp"
 #include <chrono>
 #include <fcntl.h>
 #include <iostream>

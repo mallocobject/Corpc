@@ -2,100 +2,99 @@
 #define CORPC_WHEN_ANY_HPP
 
 #include "corpc/concepts.hpp"
-#include "corpc/return_previous_task.hpp"
-#include "corpc/task.hpp"
-#include "corpc/utils.hpp"
+#include "corpc/future.hpp"
+#include "corpc/non_void_helper.hpp"
+#include "corpc/unintialized.hpp"
 #include <coroutine>
 #include <cstddef>
 #include <exception>
-#include <memory>
-#include <span>
+#include <stop_token>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <variant>
-#include <vector>
+
 namespace corpc
 {
-struct WhenAnyCtlBlock
+struct WhenAnyCtrlBlock
 {
-	static constexpr std::size_t kNullIndex = std::size_t(-1);
-	std::size_t index_{kNullIndex};
-	std::coroutine_handle<> pre_coro_;
-	std::exception_ptr exception_;
+	std::size_t index{static_cast<std::size_t>(-1)};
+	std::coroutine_handle<> coro;
+	std::exception_ptr exception;
 };
 
 struct WhenAnyAwaiter
 {
+	WhenAnyCtrlBlock& ctrl;
+	std::span<ReturnPreFuture const> tasks;
+
 	bool await_ready() const noexcept
 	{
 		return false;
 	}
 
-	std::coroutine_handle<> await_suspend(std::coroutine_handle<> coro) const
+	std::coroutine_handle<> await_suspend(
+		std::coroutine_handle<> coro) const noexcept
 	{
-		if (tasks_.empty())
+		if (tasks.empty())
 		{
 			return coro;
 		}
-		ctrl_.pre_coro_ = coro;
-		for (const auto& t : tasks_.subspan(0, tasks_.size() - 1))
+		ctrl.coro = coro;
+		for (auto const& t : tasks.subspan(0, tasks.size() - 1))
 		{
-			t.coro_.resume();
+			t.coro.resume();
 		}
-		return tasks_.back().coro_;
+		return tasks.back().coro;
 	}
 
-	void await_resume() const
+	void await_resume() const noexcept
 	{
-		if (ctrl_.exception_) [[unlikely]]
-		{
-			std::rethrow_exception(ctrl_.exception_);
-		}
 	}
-
-	WhenAnyCtlBlock& ctrl_;
-	std::span<const ReturnPreviousTask> tasks_;
 };
 
-template <typename T>
-ReturnPreviousTask whenAnyHelper(auto&& t, WhenAnyCtlBlock& ctrl,
-								 Uninitialized<T>& result, std::size_t index)
+template <Awaitable A, typename T>
+ReturnPreFuture whenAnyHelper(A const& t, WhenAnyCtrlBlock& ctrl,
+							  Uninitialized<T>& result, std::size_t index)
 {
 	try
 	{
 		if constexpr (std::is_void_v<T>)
 		{
-			co_await std::forward<decltype(t)>(t);
+			co_await t;
+			result.putValue(NonVoidHelper<>{});
 		}
 		else
 		{
-			result.putValue(co_await std::forward<decltype(t)>(t));
+			result.putValue(co_await t);
 		}
 	}
 	catch (...)
 	{
-		ctrl.exception_ = std::current_exception();
-		co_return ctrl.pre_coro_;
+		ctrl.exception = std::current_exception();
+		co_return ctrl.coro;
 	}
-
-	ctrl.index_ = index;
-	co_return ctrl.pre_coro_;
+	ctrl.index = index;
+	co_return ctrl.coro;
 }
 
 template <std::size_t... Is, typename... Ts>
-Task<std::variant<typename AwaitableTraits<Ts>::NonVoidRetType...>> whenAnyImpl(
-	std::index_sequence<Is...>, Ts&&... ts)
+Future<std::variant<typename AwaitableTraits<Ts>::NonVoidRetType...>>
+whenAnyImpl(std::index_sequence<Is...>, Ts&&... ts)
 {
-	WhenAnyCtlBlock ctrl{};
+	WhenAnyCtrlBlock ctrl{sizeof...(Ts), nullptr, nullptr};
 	std::tuple<Uninitialized<typename AwaitableTraits<Ts>::RetType>...> result;
-	ReturnPreviousTask task_array[]{
+	ReturnPreFuture future_array[]{
 		whenAnyHelper(ts, ctrl, std::get<Is>(result), Is)...};
-	co_await WhenAnyAwaiter{ctrl, task_array};
+	co_await WhenAnyAwaiter{ctrl, future_array};
 	Uninitialized<std::variant<typename AwaitableTraits<Ts>::NonVoidRetType...>>
 		var_result;
-	((ctrl.index_ == Is &&
-	  (var_result.putValue(std::in_place_index<Is>,
-						   std::get<Is>(result).moveValue()),
+	((ctrl.index == Is &&
+	  (var_result.putValue(
+		   std::in_place_index<
+			   Is>, // 精确指定 variant
+					// 应激活的选项索引，并利用该索引完成就地构造
+		   std::get<Is>(result).moveValue()),
 	   0)),
 	 ...);
 	co_return var_result.moveValue();
@@ -107,25 +106,6 @@ auto when_any(Ts&&... ts)
 {
 	return whenAnyImpl(std::make_index_sequence<sizeof...(Ts)>{},
 					   std::forward<Ts>(ts)...);
-}
-
-template <Awaitable T, typename Alloc = std::allocator<T>>
-Task<typename AwaitableTraits<T>::RetType> when_any(
-	const std::vector<T, Alloc>& tasks)
-{
-	WhenAnyCtlBlock ctrl{tasks.size()};
-	Alloc alloc = tasks.get_allocator();
-	Uninitialized<typename AwaitableTraits<T>::RetType> result;
-	{
-		std::vector<ReturnPreviousTask, Alloc> task_array{alloc};
-		task_array.reserve(tasks.size());
-		for (auto& task : tasks)
-		{
-			task_array.push_back(whenAllHelper(task, ctrl, result));
-		}
-		co_await WhenAnyAwaiter(ctrl, task_array);
-	}
-	co_return result.moveValue();
 }
 } // namespace corpc
 

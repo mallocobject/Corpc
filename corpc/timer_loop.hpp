@@ -1,112 +1,109 @@
 #ifndef CORPC_TIMER_LOOP_HPP
 #define CORPC_TIMER_LOOP_HPP
 
+#include "corpc/future.hpp"
+#include "corpc/promise.hpp"
 #include "corpc/rbtree.hpp"
-#include "corpc/task.hpp"
+#include <atomic>
 #include <chrono>
-#include <coroutine>
+#include <cstddef>
 #include <optional>
+#include <thread>
+
 namespace corpc
 {
 using Clock = std::chrono::system_clock;
 using TimePoint = Clock::time_point;
+using Duration = Clock::duration;
 
 struct SleepUntilPromise : public RbTree<SleepUntilPromise>::RbNode,
-						   public Promise<void>
+						   public Promise<>
 {
+	TimePoint expire;
+
 	auto get_return_object()
 	{
 		return std::coroutine_handle<SleepUntilPromise>::from_promise(*this);
 	}
 
 	SleepUntilPromise& operator=(SleepUntilPromise&&) = delete;
-	friend bool operator<(const SleepUntilPromise& lhs,
-						  const SleepUntilPromise& rhs) noexcept
-	{
-		return lhs.expire_time_ < rhs.expire_time_;
-	}
 
-	TimePoint expire_time_;
+	friend bool operator<(SleepUntilPromise const& lhs,
+						  SleepUntilPromise const& rhs) noexcept
+	{
+		return lhs.expire < rhs.expire;
+	}
 };
 
 struct TimerLoop
 {
-	bool hasTimer() const noexcept
-	{
-		return !timer_table_.empty();
-	}
+	RbTree<SleepUntilPromise> timer_table;
 
 	void registerTimer(SleepUntilPromise& promise)
 	{
-		timer_table_.insert(promise);
+		timer_table.insert(promise);
 	}
 
-	std::optional<Clock::duration> run()
+	void unregisterTimer(SleepUntilPromise& promise)
 	{
-		while (!timer_table_.empty())
+		timer_table.erase(promise);
+	}
+
+	std::optional<Duration> run()
+	{
+		while (!timer_table.empty())
 		{
-			auto now_time = Clock::now();
-			auto& promise = timer_table_.front();
-			if (promise.expire_time_ <= now_time)
+			auto now = Clock::now();
+			auto& promise = timer_table.front();
+			if (promise.expire < now)
 			{
-				timer_table_.erase(promise);
+				timer_table.erase(promise);
 				std::coroutine_handle<SleepUntilPromise>::from_promise(promise)
 					.resume();
 			}
 			else
 			{
-				return promise.expire_time_ - now_time; // 返回最近的时间差
+				return promise.expire - now;
 			}
 		}
 		return std::nullopt;
 	}
-
-	TimerLoop& operator=(TimerLoop&&) = delete;
-
-	RbTree<SleepUntilPromise> timer_table_{};
 };
 
 struct SleepAwaiter
 {
+	TimerLoop& loop;
+	TimePoint expire;
+
 	bool await_ready() const noexcept
 	{
-		return false;
+		return expire <= Clock::now();
 	}
 
-	void await_suspend(std::coroutine_handle<SleepUntilPromise> coro) const
+	void await_suspend(
+		std::coroutine_handle<SleepUntilPromise> coro) const noexcept
 	{
 		auto& promise = coro.promise();
-		promise.expire_time_ = expire_time_;
-		loop_.registerTimer(promise);
+
+		promise.expire = expire;
+		loop.registerTimer(promise);
 	}
 
 	void await_resume() const noexcept
 	{
 	}
-
-	TimerLoop& loop_;
-	TimePoint expire_time_;
 };
 
-// inline TimerLoop& loop()
-// {
-// 	static TimerLoop loop;
-// 	return loop;
-// }
-
-inline Task<void, SleepUntilPromise> sleep_until(TimerLoop& loop,
-												 TimePoint expire_time)
+inline Future<void, SleepUntilPromise> sleep_until(TimerLoop& loop,
+												   TimePoint expire)
 {
-	co_await SleepAwaiter(loop, expire_time);
+	co_await SleepAwaiter{loop, expire};
 }
 
-inline Task<void, SleepUntilPromise> sleep_for(TimerLoop& loop,
-											   Clock::duration duration)
+inline Future<void, SleepUntilPromise> sleep_for(TimerLoop& loop,
+												 Duration duration)
 {
-	if (duration.count() > 0)
-	{
-		co_await SleepAwaiter(loop, Clock::now() + duration);
-	}
+	co_await SleepAwaiter{loop, Clock::now() + duration};
 }
 } // namespace corpc
 

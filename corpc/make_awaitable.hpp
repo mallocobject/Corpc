@@ -1,8 +1,10 @@
-#ifndef CORPC_MAKE_AWAITER_HPP
-#define CORPC_MAKE_AWAITER_HPP
+#ifndef CORPC_MAKE_AWAITABLE_HPP
+#define CORPC_MAKE_AWAITABLE_HPP
 
 #include "corpc/concepts.hpp"
-#include "corpc/task.hpp"
+#include "corpc/future.hpp"
+#include <utility>
+
 namespace corpc
 {
 template <Awaitable A> A&& make_awaitable(A&& a)
@@ -10,9 +12,9 @@ template <Awaitable A> A&& make_awaitable(A&& a)
 	return std::forward<A>(a);
 }
 
-template <class A>
+template <typename A>
 	requires(!Awaitable<A>)
-Task<A> make_awaitable(A&& a)
+Future<A> make_awaitable(A&& a)
 {
 	co_return std::forward<A>(a);
 }
