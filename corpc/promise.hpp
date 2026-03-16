@@ -48,6 +48,8 @@ template <typename T = void> struct Promise
 	std::coroutine_handle<> pre_coro;
 	std::exception_ptr exception;
 	Uninitialized<T> var;
+	std::stop_token stop_token;
+	std::unique_ptr<std::stop_callback<std::function<void()>>> stop_callback;
 
 	std::suspend_always initial_suspend() const noexcept
 	{
@@ -103,6 +105,8 @@ template <> struct Promise<void>
 {
 	std::coroutine_handle<> pre_coro;
 	std::exception_ptr exception;
+	std::stop_token stop_token;
+	std::unique_ptr<std::stop_callback<std::function<void()>>> stop_callback;
 
 	std::suspend_always initial_suspend() const noexcept
 	{

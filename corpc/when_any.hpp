@@ -4,6 +4,7 @@
 #include "corpc/concepts.hpp"
 #include "corpc/future.hpp"
 #include "corpc/non_void_helper.hpp"
+#include "corpc/timer_loop.hpp"
 #include "corpc/unintialized.hpp"
 #include <coroutine>
 #include <cstddef>
@@ -21,6 +22,7 @@ struct WhenAnyCtrlBlock
 	std::size_t index{static_cast<std::size_t>(-1)};
 	std::coroutine_handle<> coro;
 	std::exception_ptr exception;
+	std::stop_source stop_src;
 };
 
 struct WhenAnyAwaiter
@@ -48,25 +50,28 @@ struct WhenAnyAwaiter
 		return tasks.back().coro;
 	}
 
-	void await_resume() const noexcept
+	void await_resume() const
 	{
+		// ctrl.stop_src.request_stop();
 	}
 };
 
 template <Awaitable A, typename T>
-ReturnPreFuture whenAnyHelper(A const& t, WhenAnyCtrlBlock& ctrl,
+ReturnPreFuture whenAnyHelper(A&& t, WhenAnyCtrlBlock& ctrl,
 							  Uninitialized<T>& result, std::size_t index)
 {
 	try
 	{
 		if constexpr (std::is_void_v<T>)
 		{
-			co_await t;
+			co_await set_stop_token(std::forward<A>(t),
+									ctrl.stop_src.get_token());
 			result.putValue(NonVoidHelper<>{});
 		}
 		else
 		{
-			result.putValue(co_await t);
+			result.putValue(co_await set_stop_token(std::forward<A>(t),
+													ctrl.stop_src.get_token()));
 		}
 	}
 	catch (...)
@@ -74,6 +79,7 @@ ReturnPreFuture whenAnyHelper(A const& t, WhenAnyCtrlBlock& ctrl,
 		ctrl.exception = std::current_exception();
 		co_return ctrl.coro;
 	}
+	ctrl.stop_src.request_stop();
 	ctrl.index = index;
 	co_return ctrl.coro;
 }

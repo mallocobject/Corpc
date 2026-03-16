@@ -6,9 +6,14 @@
 #include "corpc/rbtree.hpp"
 #include <atomic>
 #include <chrono>
+#include <concepts>
 #include <cstddef>
+#include <functional>
+#include <memory>
 #include <optional>
+#include <stop_token>
 #include <thread>
+#include <type_traits>
 
 namespace corpc
 {
@@ -38,15 +43,18 @@ struct SleepUntilPromise : public RbTree<SleepUntilPromise>::RbNode,
 struct TimerLoop
 {
 	RbTree<SleepUntilPromise> timer_table;
+	std::size_t count{0};
 
 	void registerTimer(SleepUntilPromise& promise)
 	{
 		timer_table.insert(promise);
+		count++;
 	}
 
 	void unregisterTimer(SleepUntilPromise& promise)
 	{
 		timer_table.erase(promise);
+		count--;
 	}
 
 	std::optional<Duration> run()
@@ -74,6 +82,7 @@ struct SleepAwaiter
 {
 	TimerLoop& loop;
 	TimePoint expire;
+	std::stop_token stop_token;
 
 	bool await_ready() const noexcept
 	{
@@ -84,8 +93,17 @@ struct SleepAwaiter
 		std::coroutine_handle<SleepUntilPromise> coro) const noexcept
 	{
 		auto& promise = coro.promise();
-
 		promise.expire = expire;
+		promise.stop_callback =
+			std::make_unique<std::stop_callback<std::function<void()>>>(
+				stop_token,
+				[&loop = loop, coro]
+				{
+					std::cout << "[TIMER CANCEL] unregisterTimer, coro="
+							  << coro.address() << std::endl;
+					loop.unregisterTimer(coro.promise());
+					coro.resume();
+				});
 		loop.registerTimer(promise);
 	}
 
@@ -104,6 +122,22 @@ inline Future<void, SleepUntilPromise> sleep_for(TimerLoop& loop,
 												 Duration duration)
 {
 	co_await SleepAwaiter{loop, Clock::now() + duration};
+}
+
+template <typename A>
+inline decltype(auto) set_stop_token(A&& a, std::stop_token token)
+{
+	using Awaiter = std::remove_cvref_t<A>;
+	if constexpr (std::is_same_v<Awaiter, SleepAwaiter>)
+	{
+		Awaiter awaiter = std::forward<A>(a);
+		awaiter.stop_token = token;
+		return awaiter;
+	}
+	else
+	{
+		return std::forward<A>(a);
+	}
 }
 } // namespace corpc
 

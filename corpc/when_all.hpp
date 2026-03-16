@@ -58,20 +58,21 @@ struct WhenAllAwaiter
 };
 
 template <Awaitable A, typename T>
-ReturnPreFuture whenAllHelper(A const& t, WhenAllCtrlBlock& ctrl,
+ReturnPreFuture whenAllHelper(A&& t, WhenAllCtrlBlock& ctrl,
 							  Uninitialized<T>& result)
 {
 	try
 	{
 		if constexpr (std::is_void_v<T>)
 		{
-			co_await t;
+			co_await std::forward<A>(t);
 			result.putValue(NonVoidHelper<>{});
 		}
 		else
 		{
-			result.putValue(co_await t); // t 最后转化为调用 await_resume
-										 // 移动返回 promise 的 val
+			result.putValue(
+				co_await std::forward<A>(t)); // t 最后转化为调用 await_resume
+											  // 移动返回 promise 的 val
 		}
 	}
 	catch (...)
@@ -85,8 +86,8 @@ ReturnPreFuture whenAllHelper(A const& t, WhenAllCtrlBlock& ctrl,
 	{
 		co_return ctrl.coro;
 	}
-	co_return nullptr; // 返回到 WhenAllAwaiter::await_suspend 执行下一个
-					   // resume
+	co_return std::noop_coroutine(); // 返回到 WhenAllAwaiter::await_suspend
+									 // 执行下一个 resume
 }
 
 template <std::size_t... Is, typename... Ts>

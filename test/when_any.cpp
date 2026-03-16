@@ -70,7 +70,10 @@ Future<> hello()
 
 Future<> test()
 {
-	co_await when_any(sleep_for(loop, 1s), hello());
+	auto s1 = sleep_for(loop, 1s);
+	auto s2 = sleep_for(loop, 2s);
+	co_await when_any(s1, s2);
+	std::cout << "-----------" << loop.tloop.count << std::endl;
 }
 
 int main()
