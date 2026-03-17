@@ -167,8 +167,7 @@ inline bool EpollLoop::run(
 inline Future<void, EpollFdPromise> wait_fd(EpollLoop& loop, int fd,
 											uint32_t events)
 {
-	EpollEventMask revents =
-		co_await EpollFdAwaiter(loop, fd, events | EPOLLONESHOT);
+	co_return co_await EpollFdAwaiter(loop, fd, events | EPOLLONESHOT);
 }
 
 } // namespace corpc
