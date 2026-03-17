@@ -134,11 +134,15 @@ template <> struct Promise<void>
 		return std::coroutine_handle<Promise>::from_promise(*this);
 	}
 
-	Promise() = default;
+	Promise() noexcept
+	{
+	}
 
 	Promise(Promise&&) = delete;
 
-	~Promise() = default;
+	~Promise() noexcept
+	{
+	}
 };
 
 } // namespace corpc
