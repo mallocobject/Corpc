@@ -4,10 +4,12 @@
 #include "corpc/check_error.hpp"
 #include "corpc/future.hpp"
 #include "corpc/promise.hpp"
+#include <cerrno>
 #include <chrono>
 #include <coroutine>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <optional>
 #include <sys/epoll.h>
 
@@ -19,7 +21,7 @@ struct EpollFdAwaiter;
 
 struct EpollFdPromise : public Promise<EpollEventMask>
 {
-	EpollFdAwaiter* awaiter{nullptr}; // 短命
+	EpollFdAwaiter* awaiter{nullptr}; // leverage awaiter to get eloop
 
 	auto get_return_object()
 	{
@@ -87,8 +89,18 @@ struct EpollFdAwaiter
 		{
 			promise.stop_callback =
 				std::make_unique<std::stop_callback<std::function<void()>>>(
-					promise.stop_token, [&loop = loop, fd = fd, coro]
-					{ loop.unregisterEvent(fd); });
+					promise.stop_token,
+					[&loop = loop, fd = fd, coro]
+					{
+						if (coro.promise().awaiter)
+						{
+							std::cout
+								<< "[EVENT CANCEL] unregisterEvent,coro = "
+								<< coro.address() << std::endl;
+							// loop.unregisterEvent(fd);
+							coro.promise().awaiter->revents = 0;
+						}
+					});
 		}
 
 		if (!loop.registerEvent(promise, ctl_op))
@@ -108,7 +120,8 @@ inline EpollFdPromise::~EpollFdPromise()
 {
 	if (awaiter)
 	{
-		awaiter->loop.unregisterEvent(awaiter->fd);
+		awaiter->loop.unregisterEvent(awaiter->fd); // eloop 并非侵入式
+		awaiter = nullptr;
 	}
 }
 
@@ -120,6 +133,14 @@ inline bool EpollLoop::registerEvent(EpollFdPromise& promise, int ctl_op)
 	int nevs = epoll_ctl(epfd, ctl_op, promise.awaiter->fd, &ev);
 	if (nevs == -1)
 	{
+		if (errno == EEXIST && ctl_op == EPOLL_CTL_ADD)
+		{
+			nevs = epoll_ctl(epfd, EPOLL_CTL_MOD, promise.awaiter->fd, &ev);
+			if (nevs != -1)
+			{
+				return true;
+			}
+		}
 		return false;
 	}
 
@@ -156,6 +177,11 @@ inline bool EpollLoop::run(
 	{
 		auto& ev = evs[i];
 		auto& promise = *reinterpret_cast<EpollFdPromise*>(ev.data.ptr);
+		if (promise.awaiter)
+		{
+			promise.awaiter->revents = ev.events;
+			promise.awaiter = nullptr;
+		}
 		std::coroutine_handle<EpollFdPromise>::from_promise(promise).resume();
 	}
 	return true;
@@ -164,7 +190,7 @@ inline bool EpollLoop::run(
 inline Future<void, EpollFdPromise> wait_fd(EpollLoop& loop, int fd,
 											uint32_t events)
 {
-	co_return co_await EpollFdAwaiter(loop, fd, events | EPOLLONESHOT);
+	co_return co_await EpollFdAwaiter{loop, fd, events | EPOLLONESHOT};
 }
 
 } // namespace corpc

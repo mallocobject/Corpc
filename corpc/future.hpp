@@ -70,9 +70,10 @@ T run_future(Loop& loop, Future<T, P> const& t)
 {
 	auto a = t.operator co_await();					 // 返回 Awaiter
 	a.await_suspend(std::noop_coroutine()).resume(); // 执行完 t 后返回
-	while (loop.run())
-	{
-	}
+	// while (loop.run())
+	// {
+	// }
+	loop.run();
 	return a.await_resume();
 }
 

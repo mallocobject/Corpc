@@ -26,7 +26,7 @@ AsyncLoop loop;
 Future<std::string> reader()
 {
 	std::string message;
-	co_await wait_fd(loop, STDIN_FILENO, EPOLLIN | EPOLLONESHOT);
+	co_await wait_fd(loop, STDIN_FILENO, EPOLLIN);
 	while (true)
 	{
 		char c;
@@ -63,6 +63,7 @@ Future<> async_main()
 			std::cout << "read out time" << std::endl;
 		}
 	}
+	co_return;
 }
 
 Future<> hello()
@@ -77,7 +78,7 @@ Future<> test()
 	auto s1 = sleep_for(loop, 4s);
 	auto s2 = sleep_for(loop, 5s);
 	co_await when_any(when_all(s1, s2), hello());
-	// co_await when_any(s1, s2);
+	co_return;
 }
 
 int main()
@@ -88,7 +89,7 @@ int main()
 	t.c_lflag &= ~ICANON;
 	tcsetattr(STDIN_FILENO, TCSANOW, &t);
 
-	auto task = test();
+	auto task = async_main();
 	task.coro.resume();
 	loop.run();
 	return 0;
