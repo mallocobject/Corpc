@@ -103,7 +103,8 @@ Future<> async_main(int listen_fd)
 				}
 				continue;
 			}
-			co_await handle_client(conn_fd, main_loop);
+			co_await handle_client(
+				conn_fd, main_loop); // 大量时必须开 o3 优化，否则尾递归不断压栈
 		}
 	}
 	co_return;
