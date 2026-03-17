@@ -2,14 +2,17 @@
 #define CORPC_WHEN_ALL_HPP
 
 #include "corpc/concepts.hpp"
+#include "corpc/current_stop_token.hpp"
 #include "corpc/future.hpp"
-#include "corpc/non_void_helper.hpp"
+#include "corpc/return_pre_future.hpp"
 #include "corpc/unintialized.hpp"
 #include <coroutine>
 #include <cstddef>
 #include <exception>
 #include <iostream>
+#include <optional>
 #include <span>
+#include <stop_token>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -21,6 +24,7 @@ struct WhenAllCtrlBlock
 	std::size_t count;
 	std::coroutine_handle<> coro;
 	std::exception_ptr exception;
+	std::stop_source stop_src;
 };
 
 struct WhenAllAwaiter
@@ -52,7 +56,6 @@ struct WhenAllAwaiter
 	{
 		if (ctrl.exception) [[unlikely]]
 		{
-			std::cout << "throw e" << std::endl;
 			std::rethrow_exception(ctrl.exception);
 		}
 	}
@@ -66,19 +69,20 @@ ReturnPreFuture whenAllHelper(A&& t, WhenAllCtrlBlock& ctrl,
 	{
 		if constexpr (std::is_void_v<T>)
 		{
-			co_await std::forward<A>(t);
+			co_await set_stop_token(std::forward<A>(t),
+									ctrl.stop_src.get_token());
 			result.putValue(NonVoidHelper<>{});
 		}
 		else
 		{
-			result.putValue(
-				co_await std::forward<A>(t)); // t 最后转化为调用 await_resume
-											  // 移动返回 promise 的 val
+			result.putValue(co_await set_stop_token(std::forward<A>(t),
+													ctrl.stop_src.get_token()));
 		}
 	}
 	catch (...)
 	{
 		ctrl.exception = std::current_exception();
+		ctrl.stop_src.request_stop();
 		co_return ctrl.coro; // 返回到 whenAllImpl 里调用 co_await,
 		// 但此前会调用 WhenAllAwaiter::await_resume 重新抛出异常
 	}
@@ -95,7 +99,14 @@ template <std::size_t... Is, typename... Ts>
 Future<std::tuple<typename AwaitableTraits<Ts>::NonVoidRetType...>> whenAllImpl(
 	std::index_sequence<Is...>, Ts&&... ts)
 {
+	std::stop_token parent_token = co_await current_stop_token();
 	WhenAllCtrlBlock ctrl{sizeof...(Ts), nullptr, nullptr};
+	std::optional<std::stop_callback<std::function<void()>>> cb;
+	if (parent_token.stop_possible())
+	{
+		cb.emplace(parent_token, [&ctrl] { ctrl.stop_src.request_stop(); });
+	}
+
 	std::tuple<Uninitialized<typename AwaitableTraits<Ts>::RetType>...> result;
 	ReturnPreFuture future_array[]{
 		whenAllHelper(ts, ctrl, std::get<Is>(result))...};

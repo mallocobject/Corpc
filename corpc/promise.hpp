@@ -1,6 +1,7 @@
 #ifndef CORPC_PROMISE_HPP
 #define CORPC_PROMISE_HPP
 
+#include "corpc/pre_awaiter.hpp"
 #include "corpc/unintialized.hpp"
 #include <cassert>
 #include <coroutine>
@@ -12,31 +13,6 @@
 
 namespace corpc
 {
-
-struct PreAwaiter
-{
-	std::coroutine_handle<> coro;
-
-	bool await_ready() const noexcept
-	{
-		return false;
-	}
-
-	std::coroutine_handle<> await_suspend(
-		std::coroutine_handle<>) const noexcept
-	{
-		if (coro)
-		{
-			return coro;
-		}
-		return std::noop_coroutine();
-	}
-
-	void await_resume() const noexcept
-	{
-	}
-};
-
 template <typename T = void> struct Promise
 {
 	std::coroutine_handle<> pre_coro;
@@ -163,42 +139,6 @@ template <> struct Promise<void>
 	Promise(Promise&&) = delete;
 
 	~Promise() = default;
-};
-
-struct ReturnPrePromise
-{
-	std::coroutine_handle<> pre_coro;
-
-	std::suspend_always initial_suspend() const noexcept
-	{
-		return {};
-	}
-
-	auto final_suspend() const noexcept
-	{
-		return PreAwaiter{pre_coro};
-	}
-
-	void unhandled_exception()
-	{
-		throw;
-	}
-
-	void return_value(std::coroutine_handle<> coro) noexcept
-	{
-		pre_coro = coro;
-	}
-
-	std::coroutine_handle<ReturnPrePromise> get_return_object()
-	{
-		return std::coroutine_handle<ReturnPrePromise>::from_promise(*this);
-	}
-
-	ReturnPrePromise() = default;
-
-	ReturnPrePromise(ReturnPrePromise&&) = delete;
-
-	~ReturnPrePromise() = default;
 };
 
 } // namespace corpc

@@ -2,12 +2,14 @@
 #define CORPC_WHEN_ANY_HPP
 
 #include "corpc/concepts.hpp"
+#include "corpc/current_stop_token.hpp"
 #include "corpc/future.hpp"
-#include "corpc/non_void_helper.hpp"
+#include "corpc/return_pre_future.hpp"
 #include "corpc/unintialized.hpp"
 #include <coroutine>
 #include <cstddef>
 #include <exception>
+#include <optional>
 #include <span>
 #include <stop_token>
 #include <tuple>
@@ -52,7 +54,10 @@ struct WhenAnyAwaiter
 
 	void await_resume() const
 	{
-		// ctrl.stop_src.request_stop();
+		if (ctrl.exception) [[unlikely]]
+		{
+			std::rethrow_exception(ctrl.exception);
+		}
 	}
 };
 
@@ -77,6 +82,7 @@ ReturnPreFuture whenAnyHelper(A&& t, WhenAnyCtrlBlock& ctrl,
 	catch (...)
 	{
 		ctrl.exception = std::current_exception();
+		ctrl.stop_src.request_stop();
 		co_return ctrl.coro;
 	}
 	ctrl.stop_src.request_stop();
@@ -88,7 +94,14 @@ template <std::size_t... Is, typename... Ts>
 Future<std::variant<typename AwaitableTraits<Ts>::NonVoidRetType...>>
 whenAnyImpl(std::index_sequence<Is...>, Ts&&... ts)
 {
+	std::stop_token parent_token = co_await current_stop_token();
 	WhenAnyCtrlBlock ctrl{sizeof...(Ts), nullptr, nullptr};
+	std::optional<std::stop_callback<std::function<void()>>> cb;
+	if (parent_token.stop_possible())
+	{
+		cb.emplace(parent_token, [&ctrl] { ctrl.stop_src.request_stop(); });
+	}
+
 	std::tuple<Uninitialized<typename AwaitableTraits<Ts>::RetType>...> result;
 	ReturnPreFuture future_array[]{
 		whenAnyHelper(ts, ctrl, std::get<Is>(result), Is)...};

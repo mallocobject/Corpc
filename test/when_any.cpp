@@ -67,16 +67,17 @@ Future<> async_main()
 
 Future<> hello()
 {
-	std::this_thread::sleep_for(2s);
+	co_await sleep_for(loop, 3s);
 	std::cout << "hello" << std::endl;
 	co_return;
 }
 
 Future<> test()
 {
-	auto s1 = sleep_for(loop, 1s);
-	auto s2 = sleep_for(loop, 2s);
-	co_await when_any(s1, s2);
+	auto s1 = sleep_for(loop, 4s);
+	auto s2 = sleep_for(loop, 5s);
+	co_await when_any(when_all(s1, s2), hello());
+	// co_await when_any(s1, s2);
 }
 
 int main()
@@ -87,7 +88,7 @@ int main()
 	t.c_lflag &= ~ICANON;
 	tcsetattr(STDIN_FILENO, TCSANOW, &t);
 
-	auto task = async_main();
+	auto task = test();
 	task.coro.resume();
 	loop.run();
 	return 0;

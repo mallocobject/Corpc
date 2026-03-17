@@ -87,11 +87,8 @@ struct EpollFdAwaiter
 		{
 			promise.stop_callback =
 				std::make_unique<std::stop_callback<std::function<void()>>>(
-					promise.stop_token,
-					[&loop = loop, fd = fd, coro]
-					{
-						// TODO
-					});
+					promise.stop_token, [&loop = loop, fd = fd, coro]
+					{ loop.unregisterEvent(fd); });
 		}
 
 		if (!loop.registerEvent(promise, ctl_op))

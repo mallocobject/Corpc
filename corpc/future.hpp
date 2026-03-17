@@ -65,25 +65,6 @@ template <typename T = void, typename P = Promise<T>> struct Future
 	}
 };
 
-struct ReturnPreFuture
-{
-	using promise_type = ReturnPrePromise;
-
-	std::coroutine_handle<promise_type> coro;
-
-	ReturnPreFuture(std::coroutine_handle<promise_type> coro) : coro(coro)
-	{
-	}
-
-	ReturnPreFuture(ReturnPreFuture&&) = delete;
-
-	~ReturnPreFuture()
-	{
-		assert(coro);
-		coro.destroy();
-	}
-};
-
 template <typename Loop, typename T, typename P>
 T run_future(Loop& loop, Future<T, P> const& t)
 {

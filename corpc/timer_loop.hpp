@@ -6,6 +6,7 @@
 #include "corpc/rbtree.hpp"
 #include <chrono>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <stop_token>
@@ -95,9 +96,9 @@ struct SleepAwaiter
 					{
 						if (coro.promise().in_tree())
 						{
-							// std::cout << "[TIMER CANCEL] unregisterTimer,
-							// coro="
-							// 		  << coro.address() << std::endl;
+							std::cout
+								<< "[TIMER CANCEL] unregisterTimer,coro = "
+								<< coro.address() << std::endl;
 							loop.unregisterTimer(coro.promise());
 							// coro.resume();
 						}
