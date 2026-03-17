@@ -4,6 +4,7 @@
 #include "corpc/check_error.hpp"
 #include "corpc/future.hpp"
 #include "corpc/promise.hpp"
+#include "elog/logger.h"
 #include <cerrno>
 #include <chrono>
 #include <coroutine>
@@ -30,7 +31,7 @@ struct EpollFdPromise : public Promise<EpollEventMask>
 
 	EpollFdPromise& operator=(EpollFdPromise&&) = delete;
 
-	~EpollFdPromise();
+	// ~EpollFdPromise();
 };
 
 struct EpollLoop
@@ -97,14 +98,17 @@ struct EpollFdAwaiter
 							std::cout
 								<< "[EVENT CANCEL] unregisterEvent,coro = "
 								<< coro.address() << std::endl;
-							// loop.unregisterEvent(fd);
-							coro.promise().awaiter->revents = 0;
+							loop.unregisterEvent(fd);
+
+							coro.promise().awaiter = nullptr;
 						}
 					});
 		}
 
 		if (!loop.registerEvent(promise, ctl_op))
 		{
+			LOG_WARN << "register event: " << promise.awaiter->events
+					 << " failed for fd: " << promise.awaiter->fd;
 			promise.awaiter = nullptr;
 			coro.resume();
 		}
@@ -112,18 +116,19 @@ struct EpollFdAwaiter
 
 	EpollEventMask await_resume() const noexcept
 	{
+		loop.unregisterEvent(fd);
 		return revents;
 	}
 };
 
-inline EpollFdPromise::~EpollFdPromise()
-{
-	if (awaiter)
-	{
-		awaiter->loop.unregisterEvent(awaiter->fd); // eloop 并非侵入式
-		awaiter = nullptr;
-	}
-}
+// inline EpollFdPromise::~EpollFdPromise()
+// {
+// 	if (awaiter)
+// 	{
+// 		awaiter->loop.unregisterEvent(awaiter->fd); // eloop 并非侵入式
+// 		awaiter = nullptr;
+// 	}
+// }
 
 inline bool EpollLoop::registerEvent(EpollFdPromise& promise, int ctl_op)
 {
@@ -133,14 +138,6 @@ inline bool EpollLoop::registerEvent(EpollFdPromise& promise, int ctl_op)
 	int nevs = epoll_ctl(epfd, ctl_op, promise.awaiter->fd, &ev);
 	if (nevs == -1)
 	{
-		if (errno == EEXIST && ctl_op == EPOLL_CTL_ADD)
-		{
-			nevs = epoll_ctl(epfd, EPOLL_CTL_MOD, promise.awaiter->fd, &ev);
-			if (nevs != -1)
-			{
-				return true;
-			}
-		}
 		return false;
 	}
 
@@ -172,23 +169,29 @@ inline bool EpollLoop::run(
 						 .count();
 	}
 
+	// be unregisterred 的 fd 不会出现在这
 	int ret = checkError(epoll_wait(epfd, evs, kEventSize, timeout_ms));
 	for (int i = 0; i < ret; i++)
 	{
 		auto& ev = evs[i];
-		auto& promise = *reinterpret_cast<EpollFdPromise*>(ev.data.ptr);
-		if (promise.awaiter)
+		auto& awaiter = reinterpret_cast<EpollFdPromise*>(ev.data.ptr)->awaiter;
+		if (awaiter)
 		{
-			promise.awaiter->revents = ev.events;
-			promise.awaiter = nullptr;
+			awaiter->revents = ev.events;
+			awaiter = nullptr;
 		}
+	}
+	for (int i = 0; i < ret; i++)
+	{
+		auto& ev = evs[i];
+		auto& promise = *reinterpret_cast<EpollFdPromise*>(ev.data.ptr);
 		std::coroutine_handle<EpollFdPromise>::from_promise(promise).resume();
 	}
 	return true;
 }
 
-inline Future<void, EpollFdPromise> wait_fd(EpollLoop& loop, int fd,
-											uint32_t events)
+inline Future<EpollEventMask, EpollFdPromise> wait_fd(EpollLoop& loop, int fd,
+													  uint32_t events)
 {
 	co_return co_await EpollFdAwaiter{loop, fd, events | EPOLLONESHOT};
 }
