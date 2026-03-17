@@ -100,6 +100,18 @@ template <typename T, typename P> void spawn_future(Future<T, P> const& t)
 	auto a = t.operator co_await();
 	a.await_suspend(std::noop_coroutine()).resume();
 }
+
+template <typename A> inline A&& set_stop_token(A&& a, std::stop_token token)
+{
+	if constexpr (requires { a.coro.promise().stop_token; })
+	{
+		if (a.coro)
+		{
+			a.coro.promise().stop_token = std::move(token);
+		}
+	}
+	return std::forward<A>(a);
+}
 } // namespace corpc
 
 #endif

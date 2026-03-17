@@ -10,7 +10,6 @@
 #include <cstdint>
 #include <optional>
 #include <sys/epoll.h>
-#include <vector>
 
 namespace corpc
 {
@@ -83,6 +82,18 @@ struct EpollFdAwaiter
 	{
 		auto& promise = coro.promise();
 		promise.awaiter = this;
+
+		if (promise.stop_token.stop_possible())
+		{
+			promise.stop_callback =
+				std::make_unique<std::stop_callback<std::function<void()>>>(
+					promise.stop_token,
+					[&loop = loop, fd = fd, coro]
+					{
+						// TODO
+					});
+		}
+
 		if (!loop.registerEvent(promise, ctl_op))
 		{
 			promise.awaiter = nullptr;
@@ -156,7 +167,8 @@ inline bool EpollLoop::run(
 inline Future<void, EpollFdPromise> wait_fd(EpollLoop& loop, int fd,
 											uint32_t events)
 {
-	co_await EpollFdAwaiter(loop, fd, events | EPOLLONESHOT);
+	EpollEventMask revents =
+		co_await EpollFdAwaiter(loop, fd, events | EPOLLONESHOT);
 }
 
 } // namespace corpc

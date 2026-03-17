@@ -16,17 +16,17 @@
 #include <termios.h>
 #include <thread>
 #include <unistd.h>
+#include <variant>
 
 using namespace corpc;
 using namespace std::chrono_literals;
 
 AsyncLoop loop;
-std::string message;
 
 Future<std::string> reader()
 {
+	std::string message;
 	co_await wait_fd(loop, STDIN_FILENO, EPOLLIN | EPOLLONESHOT);
-	message.clear();
 	while (true)
 	{
 		char c;
@@ -41,23 +41,27 @@ Future<std::string> reader()
 		}
 		message += c;
 	}
+	co_return message;
 }
 
 Future<> async_main()
 {
 	while (true)
 	{
-		co_await when_any(reader(), sleep_for(loop, 1s));
-		if (message.empty())
+		auto v = co_await when_any(reader(), sleep_for(loop, 1s));
+
+		if (auto* str = std::get_if<0>(&v))
+		{
+			if (*str == "q" || *str == "q\n")
+			{
+				break;
+			}
+			std::cout << "-> " << *str << std::endl;
+		}
+		else
 		{
 			std::cout << "read out time" << std::endl;
-			continue;
 		}
-		if (message == "q")
-		{
-			break;
-		}
-		std::cout << "-> " << message << std::endl;
 	}
 }
 
@@ -73,7 +77,6 @@ Future<> test()
 	auto s1 = sleep_for(loop, 1s);
 	auto s2 = sleep_for(loop, 2s);
 	co_await when_any(s1, s2);
-	std::cout << "-----------" << loop.tloop.count << std::endl;
 }
 
 int main()
@@ -84,7 +87,7 @@ int main()
 	t.c_lflag &= ~ICANON;
 	tcsetattr(STDIN_FILENO, TCSANOW, &t);
 
-	auto task = test();
+	auto task = async_main();
 	task.coro.resume();
 	loop.run();
 	return 0;

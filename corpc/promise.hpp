@@ -1,20 +1,14 @@
 #ifndef CORPC_PROMISE_HPP
 #define CORPC_PROMISE_HPP
 
-#include "corpc/rbtree.hpp"
 #include "corpc/unintialized.hpp"
 #include <cassert>
-#include <chrono>
 #include <coroutine>
 #include <exception>
 #include <functional>
-#include <iostream>
 #include <memory>
-#include <optional>
-#include <stdexcept>
 #include <stop_token>
 #include <utility>
-#include <variant>
 
 namespace corpc
 {
@@ -50,6 +44,18 @@ template <typename T = void> struct Promise
 	Uninitialized<T> var;
 	std::stop_token stop_token;
 	std::unique_ptr<std::stop_callback<std::function<void()>>> stop_callback;
+
+	template <typename A> A&& await_transform(A&& awaitable) noexcept
+	{
+		if constexpr (requires { awaitable.coro.promise().stop_token; })
+		{
+			if (awaitable.coro && this->stop_token.stop_possible())
+			{
+				awaitable.coro.promise().stop_token = this->stop_token;
+			}
+		}
+		return std::forward<A>(awaitable);
+	}
 
 	std::suspend_always initial_suspend() const noexcept
 	{
@@ -107,6 +113,18 @@ template <> struct Promise<void>
 	std::exception_ptr exception;
 	std::stop_token stop_token;
 	std::unique_ptr<std::stop_callback<std::function<void()>>> stop_callback;
+
+	template <typename A> A&& await_transform(A&& awaitable) noexcept
+	{
+		if constexpr (requires { awaitable.coro.promise().stop_token; })
+		{
+			if (awaitable.coro && this->stop_token.stop_possible())
+			{
+				awaitable.coro.promise().stop_token = this->stop_token;
+			}
+		}
+		return std::forward<A>(awaitable);
+	}
 
 	std::suspend_always initial_suspend() const noexcept
 	{

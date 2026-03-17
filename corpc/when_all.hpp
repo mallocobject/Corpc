@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <exception>
 #include <iostream>
+#include <span>
 #include <tuple>
 #include <type_traits>
 #include <utility>
